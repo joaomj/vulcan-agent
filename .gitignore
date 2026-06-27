@@ -2,5 +2,5 @@
 **/*.rs.bk
 Cargo.lock
 .DS_Store
-/agent-loops/
 agent-loops/
+docs/inspiring-agents.txt
