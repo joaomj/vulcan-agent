@@ -1,0 +1,4 @@
+https://github.com/MoonshotAI/kimi-code
+https://github.com/NousResearch/hermes-agent
+https://github.com/earendil-works/pi
+https://github.com/anomalyco/opencode
