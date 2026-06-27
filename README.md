@@ -1,8 +1,8 @@
-# Agent Rust
+# Vulcan Agent
 
-> **Working title.** A local-first, Rust-based coding agent designed for speed, stability, portability, and extensibility.
+> A local-first, Rust-based coding agent designed for speed, stability, portability, and extensibility.
 
-Agent Rust is a self-hosted coding assistant that runs as a native Rust binary. It exposes a minimal web UI for desktop use and a Telegram bot for mobile use, both talking to a single HTTP/WebSocket server that owns sessions, providers, tools, memory, and guardrails.
+Vulcan Agent is a self-hosted coding assistant that runs as a native Rust binary. It exposes a minimal web UI for desktop use and a Telegram bot for mobile use, both talking to a single HTTP/WebSocket server that owns sessions, providers, tools, memory, and guardrails.
 
 The project is inspired by [OpenCode](https://github.com/anomalyco/opencode), [Codex](https://github.com/openai/codex), and [Hermes Agent](https://github.com/NousResearch/hermes-agent), but rebuilt with a smaller core, stricter performance budgets, and worktree-based isolation by default.
 
@@ -84,8 +84,8 @@ A more detailed architecture diagram is available in [`docs/architecture.html`](
 ### Build from source
 
 ```bash
-git clone git@github.com:joaomj/agent-rust.git
-cd agent-rust
+git clone git@github.com:joaomj/vulcan-agent.git
+cd vulcan-agent
 cargo build --release
 ```
 

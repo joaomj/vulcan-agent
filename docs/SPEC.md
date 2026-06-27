@@ -1,6 +1,6 @@
-# Agent Rust — Specification and Implementation Plan
+# Vulcan Agent — Specification and Implementation Plan
 
-> **Working title.** The definitive project name will be chosen later.
+> **Project name:** Vulcan Agent.
 >
 > This document is a specification-focused plan for a Rust-based coding agent inspired by OpenCode, but redesigned for speed, simplicity, and the specific workflows described in the design discussions. It is intended to guide implementation by AI agents and human developers.
 
@@ -419,7 +419,7 @@ always_approve_hosts = ["localhost", "127.0.0.1"]  # web_fetch allowlist
 ## 9. Repository Layout
 
 ```text
-agent-rust/
+vulcan-agent/
 ├── Cargo.toml
 ├── crates/
 │   ├── core/            # domain, sessions, worktrees, agent loop
