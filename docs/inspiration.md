@@ -14,7 +14,7 @@
 ## Codebase indexing
 - Source: https://x.com/max_paperclips/status/2071465351959998723
 - Idea: The solution for coding agents having finite context windows was to use grep. But the problem now is they have tunnel vision because they don't understand the whole codebase. Changes in one area of the code base often don't align to the broad project vision. Because grep alone wasn't a good solution. there were plenty of solutions between "passive semantic rag" and "grep the entire codebase". Why not LSPs that warn the model that it's doing it wrong, or hybrid BM25-semantic indices over the codebase, with active tools to look up what it needs, skills acting as a code map & internal docs. there's a lot of stuff you can do. Anthropic sophon-locked everyone by saying "grep is all you need", people just bought into it because hype. grep should be 1 tool it uses among many, not the whole.
-- **Cursor** does something like this. The objective is to improve agent awareness and also save costs by avoiding repeatdly querying the codebase. See: 
+- **Cursor** does something like this. The objective is to improve agent awareness and also save costs by avoiding repeatdly querying the codebase. See:
   - (https://towardsdatascience.com/how-cursor-actually-indexes-your-codebase/)
   - (https://cursor.com/blog/secure-codebase-indexing)
 - See also: https://github.com/colbymchenry/codegraph
@@ -33,7 +33,7 @@
 ## Inspiring agents
 
 ### [Hermes Agent](https://github.com/NousResearch/hermes-agent#)
-- Pros: 
+- Pros:
   - closed loop self-improving feature. See:
     - (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills#learning-a-skill-from-sources-learn)
     - (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills#when-the-agent-creates-skills)

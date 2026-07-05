@@ -30,8 +30,24 @@ impl SessionProjector {
         let mut messages: Vec<Message> = Vec::new();
         let mut created_at: Option<DateTime<Utc>> = None;
         let mut updated_at: Option<DateTime<Utc>> = None;
+        let mut seen_session_created = false;
+        let mut previous_sequence: Option<u64> = None;
 
         for event in events {
+            if event.session_id != session_id {
+                projection.warnings.push(format!(
+                    "Event sequence {} belongs to session {}, expected {}",
+                    event.sequence, event.session_id, session_id
+                ));
+            }
+            if previous_sequence.is_some_and(|previous| event.sequence <= previous) {
+                projection.warnings.push(format!(
+                    "Out-of-order event sequence {} after {:?}",
+                    event.sequence, previous_sequence
+                ));
+            }
+            previous_sequence = Some(event.sequence);
+
             if event.version > 1 {
                 projection.warnings.push(format!(
                     "Unsupported event version {} at sequence {}",
@@ -42,6 +58,13 @@ impl SessionProjector {
 
             match &event.kind {
                 EventKind::SessionCreated { mode: m } => {
+                    if seen_session_created {
+                        projection.warnings.push(format!(
+                            "Duplicate session creation at sequence {}",
+                            event.sequence
+                        ));
+                    }
+                    seen_session_created = true;
                     mode = m.clone();
                     if created_at.is_none() {
                         created_at = Some(event.created_at);
@@ -52,6 +75,12 @@ impl SessionProjector {
                     role,
                     content,
                 } => {
+                    if !seen_session_created {
+                        projection.warnings.push(format!(
+                            "Message appended before session creation at sequence {}",
+                            event.sequence
+                        ));
+                    }
                     messages.push(Message {
                         id: message_id.clone(),
                         role: role.clone(),
@@ -103,9 +132,19 @@ impl Default for SessionProjector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use vulcan_core::event::Event;
-    use vulcan_core::id::{MessageId, ProviderCallId, SessionId};
+    use vulcan_core::id::{EventId, MessageId, ProviderCallId, SessionId};
     use vulcan_core::session::{ContentBlock, MessageRole, SessionMode};
+
+    fn event(session_id: SessionId, sequence: u64, kind: EventKind) -> Event {
+        let mut event = Event::new(session_id, sequence, kind);
+        event.id = EventId(format!("event-{}", sequence));
+        event.created_at = Utc
+            .with_ymd_and_hms(2026, 1, 1, 0, 0, sequence as u32)
+            .unwrap();
+        event
+    }
 
     #[test]
     fn test_empty_events() {
@@ -205,7 +244,7 @@ mod tests {
     #[test]
     fn test_unsupported_version_warning() {
         let session_id = SessionId("sess-3".into());
-        let mut event = Event::new(
+        let mut event = event(
             session_id.clone(),
             1,
             EventKind::SessionCreated {
@@ -219,5 +258,115 @@ mod tests {
 
         assert!(!result.warnings.is_empty());
         assert!(result.warnings[0].contains("99"));
+    }
+
+    #[test]
+    fn projector_sets_created_and_updated_from_events() {
+        let session_id = SessionId("sess-times".into());
+        let events = vec![
+            event(
+                session_id.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Ask,
+                },
+            ),
+            event(
+                session_id,
+                2,
+                EventKind::MessageAppended {
+                    message_id: MessageId("msg-time".into()),
+                    role: MessageRole::User,
+                    content: Vec::new(),
+                },
+            ),
+        ];
+
+        let result = SessionProjector::new().project(&events);
+        let session = result.session.unwrap();
+
+        assert_eq!(session.created_at, events[0].created_at);
+        assert_eq!(session.updated_at, events[1].created_at);
+    }
+
+    #[test]
+    fn projector_warns_on_mixed_session_events() {
+        let expected_session = SessionId("sess-expected".into());
+        let other_session = SessionId("sess-other".into());
+        let events = vec![
+            event(
+                expected_session,
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Ask,
+                },
+            ),
+            event(
+                other_session,
+                2,
+                EventKind::ErrorRecorded {
+                    message: "wrong stream".into(),
+                },
+            ),
+        ];
+
+        let result = SessionProjector::new().project(&events);
+
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("belongs to session sess-other")));
+    }
+
+    #[test]
+    fn projector_warns_on_out_of_order_events() {
+        let session_id = SessionId("sess-order".into());
+        let events = vec![
+            event(
+                session_id.clone(),
+                2,
+                EventKind::MessageAppended {
+                    message_id: MessageId("msg-order".into()),
+                    role: MessageRole::User,
+                    content: Vec::new(),
+                },
+            ),
+            event(
+                session_id,
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Ask,
+                },
+            ),
+        ];
+
+        let result = SessionProjector::new().project(&events);
+
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Out-of-order event sequence 1")));
+    }
+
+    #[test]
+    fn projector_warns_when_message_precedes_session_creation() {
+        let session_id = SessionId("sess-message-first".into());
+        let events = vec![event(
+            session_id,
+            1,
+            EventKind::MessageAppended {
+                message_id: MessageId("msg-first".into()),
+                role: MessageRole::User,
+                content: Vec::new(),
+            },
+        )];
+
+        let result = SessionProjector::new().project(&events);
+
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("before session creation")));
+        assert_eq!(result.session.unwrap().messages.len(), 1);
     }
 }

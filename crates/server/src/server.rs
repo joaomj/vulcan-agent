@@ -36,17 +36,19 @@ pub async fn serve(config: ServerConfig) -> Result<(), Box<dyn std::error::Error
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
+    use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt;
 
-    #[tokio::test]
-    async fn test_health_endpoint() {
+    fn app() -> Router {
         let config = ServerConfig::default();
         let state = Arc::new(RwLock::new(AppState::new(config).unwrap()));
-        let app = build_router(state);
+        build_router(state)
+    }
 
-        let response = app
+    #[tokio::test]
+    async fn health_returns_ok_body() {
+        let response = app()
             .oneshot(
                 Request::builder()
                     .uri("/health")
@@ -57,5 +59,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn unknown_route_returns_404() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/missing")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

@@ -1,5 +1,5 @@
 use crate::error::StorageError;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use vulcan_core::event::{Event, EventKind};
 use vulcan_core::id::SessionId;
 
@@ -28,7 +28,7 @@ impl<'a> EventStore<'a> {
             params![event.created_at.to_rfc3339(), event.session_id.to_string(),],
         )?;
 
-        tx.execute(
+        let inserted = tx.execute(
             "INSERT OR IGNORE INTO events (id, session_id, sequence, version, event_type, payload, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -41,6 +41,21 @@ impl<'a> EventStore<'a> {
                 event.created_at.to_rfc3339(),
             ],
         )?;
+        if inserted == 0 {
+            let existing_event_id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM events WHERE session_id = ?1 AND sequence = ?2",
+                    params![event.session_id.to_string(), event.sequence],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if existing_event_id.as_deref() != Some(event.id.0.as_str()) {
+                return Err(StorageError::Conflict(format!(
+                    "Event sequence {} already exists for session {}",
+                    event.sequence, event.session_id
+                )));
+            }
+        }
 
         tx.commit()?;
         Ok(())
@@ -103,15 +118,17 @@ impl<'a> EventStore<'a> {
         Ok(sessions)
     }
 
-    pub fn delete_session(&self, session_id: &SessionId) -> Result<(), StorageError> {
-        self.conn.execute(
+    pub fn delete_session(&mut self, session_id: &SessionId) -> Result<(), StorageError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
             "DELETE FROM events WHERE session_id = ?1",
             params![session_id.to_string()],
         )?;
-        self.conn.execute(
+        tx.execute(
             "DELETE FROM sessions WHERE id = ?1",
             params![session_id.to_string()],
         )?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -135,19 +152,29 @@ fn event_type_name(kind: &EventKind) -> &'static str {
 mod tests {
     use super::*;
     use crate::migration;
+    use chrono::{TimeZone, Utc};
     use rusqlite::Connection;
-    use vulcan_core::event::EventKind;
-    use vulcan_core::id::SessionId;
-    use vulcan_core::session::{MessageRole, SessionMode};
+    use vulcan_core::event::{Event, EventKind};
+    use vulcan_core::id::{EventId, MessageId, SessionId};
+    use vulcan_core::session::{ContentBlock, MessageRole, SessionMode};
 
     fn setup_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        migration::run(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        migration::run(&mut conn).unwrap();
         conn
     }
 
     fn setup_store(conn: &mut Connection) -> EventStore<'_> {
         EventStore::new(conn)
+    }
+
+    fn event(session_id: SessionId, sequence: u64, kind: EventKind) -> Event {
+        let mut event = Event::new(session_id, sequence, kind);
+        event.id = EventId(format!("event-{}-{}", event.session_id, sequence));
+        event.created_at = Utc
+            .with_ymd_and_hms(2026, 1, 1, 0, 0, sequence as u32)
+            .unwrap();
+        event
     }
 
     #[test]
@@ -156,7 +183,7 @@ mod tests {
         let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-1".into());
-        let event = Event::new(
+        let event = event(
             session_id.clone(),
             1,
             EventKind::SessionCreated {
@@ -217,12 +244,12 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_append() {
+    fn append_is_idempotent_for_same_event_id() {
         let mut conn = setup_db();
         let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-3".into());
-        let event = Event::new(
+        let event = event(
             session_id.clone(),
             1,
             EventKind::SessionCreated {
@@ -235,6 +262,41 @@ mod tests {
 
         let events = store.replay(&session_id).unwrap();
         assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn append_rejects_duplicate_sequence_for_different_event() {
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
+
+        let session_id = SessionId("sess-conflict".into());
+        let first = event(
+            session_id.clone(),
+            1,
+            EventKind::SessionCreated {
+                mode: SessionMode::Build,
+            },
+        );
+        let mut second = event(
+            session_id.clone(),
+            1,
+            EventKind::MessageAppended {
+                message_id: MessageId("msg-conflict".into()),
+                role: MessageRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "conflicting sequence".into(),
+                }],
+            },
+        );
+        second.id = EventId("different-event-id".into());
+
+        store.append(&first).unwrap();
+        let err = store.append(&second).unwrap_err();
+        assert!(matches!(err, StorageError::Conflict(_)));
+
+        let events = store.replay(&session_id).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].kind, EventKind::SessionCreated { .. }));
     }
 
     #[test]
@@ -255,7 +317,7 @@ mod tests {
         let s2 = SessionId("sess-b".into());
 
         store
-            .append(&Event::new(
+            .append(&event(
                 s1.clone(),
                 1,
                 EventKind::SessionCreated {
@@ -264,7 +326,7 @@ mod tests {
             ))
             .unwrap();
         store
-            .append(&Event::new(
+            .append(&event(
                 s2.clone(),
                 1,
                 EventKind::SessionCreated {
@@ -278,17 +340,27 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_session() {
+    fn delete_session_preserves_other_sessions() {
         let mut conn = setup_db();
         let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-del".into());
+        let other_session_id = SessionId("sess-keep".into());
         store
-            .append(&Event::new(
+            .append(&event(
                 session_id.clone(),
                 1,
                 EventKind::SessionCreated {
                     mode: SessionMode::Build,
+                },
+            ))
+            .unwrap();
+        store
+            .append(&event(
+                other_session_id.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Ask,
                 },
             ))
             .unwrap();
@@ -297,7 +369,53 @@ mod tests {
         let events = store.replay(&session_id).unwrap();
         assert!(events.is_empty());
 
+        let other_events = store.replay(&other_session_id).unwrap();
+        assert_eq!(other_events.len(), 1);
+
         let sessions = store.list_sessions().unwrap();
-        assert!(sessions.is_empty());
+        assert_eq!(sessions, vec![other_session_id]);
+    }
+
+    #[test]
+    fn replay_roundtrips_full_event_payload() {
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
+
+        let session_id = SessionId("sess-roundtrip".into());
+        let expected = event(
+            session_id.clone(),
+            1,
+            EventKind::MessageAppended {
+                message_id: MessageId("msg-roundtrip".into()),
+                role: MessageRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "full payload".into(),
+                }],
+            },
+        );
+
+        store.append(&expected).unwrap();
+        let events = store.replay(&session_id).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, expected.id);
+        assert_eq!(events[0].session_id, expected.session_id);
+        assert_eq!(events[0].sequence, expected.sequence);
+        assert_eq!(events[0].version, expected.version);
+        assert_eq!(events[0].created_at, expected.created_at);
+        match &events[0].kind {
+            EventKind::MessageAppended {
+                message_id,
+                role,
+                content,
+            } => {
+                assert_eq!(message_id, &MessageId("msg-roundtrip".into()));
+                assert!(matches!(role, MessageRole::User));
+                assert!(
+                    matches!(content.as_slice(), [ContentBlock::Text { text }] if text == "full payload")
+                );
+            }
+            other => panic!("unexpected event kind: {other:?}"),
+        }
     }
 }
