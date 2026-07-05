@@ -2,7 +2,7 @@
 
 > A local-first, Rust-based coding agent designed for speed, stability, portability, and extensibility.
 
-Vulcan Agent is a self-hosted coding assistant that runs as a native Rust binary. It exposes a minimal web UI for desktop use and a Telegram bot for mobile use, both talking to a single HTTP/WebSocket server that owns sessions, providers, tools, memory, and guardrails.
+Vulcan Agent is a self-hosted coding assistant that runs as a native Rust binary. It exposes a minimal web UI (PWA) for desktop and mobile use, talking to a single HTTP/WebSocket server that owns sessions, providers, tools, memory, and guardrails.
 
 The project is inspired by [OpenCode](https://github.com/anomalyco/opencode), [Codex](https://github.com/openai/codex), and [Hermes Agent](https://github.com/NousResearch/hermes-agent), but rebuilt with a smaller core, stricter performance budgets, and worktree-based isolation by default.
 
@@ -15,15 +15,14 @@ The project is inspired by [OpenCode](https://github.com/anomalyco/opencode), [C
    - Idle server < 128 MB RSS.
    - Per-session overhead < 50 MB RSS.
 2. **Stability** — event-sourced sessions, idempotent tools, append-only audit log, full worktree reset for undo, and config-driven timeouts.
-3. **Portability** — browser + Telegram clients; runs locally and can be exposed via Tailscale or SSH tunnel; only runtime dependency is the system `git` binary.
+3. **Portability** — browser (PWA) client; runs locally and can be exposed via Tailscale or SSH tunnel; only runtime dependency is the system `git` binary.
 4. **Extensibility** — MCP servers and on-demand skills extend the agent without bloating the core.
 
 ---
 
 ## Features
 
-- **Web UI** — vanilla HTML/CSS/JS, no frontend framework.
-- **Telegram bot** — mobile client with text and voice message support.
+- **Web UI (PWA)** — vanilla HTML/CSS/JS, no frontend framework. Desktop and mobile via Tailscale / SSH tunnel / LAN. Installable as PWA with Web Speech API support.
 - **WebSocket-first transport** — bidirectional streaming for prompts, approvals, and subagent status.
 - **Worktree isolation** — every session starts in a fresh git worktree; subagents get nested child worktrees.
 - **Deterministic control** — slash commands (`/ask`, `/plan`, `/build`, `/debug`, `/undo`, `/model`, `/permissions`, etc.) bypass the LLM.
@@ -48,10 +47,12 @@ The project is inspired by [OpenCode](https://github.com/anomalyco/opencode), [C
 │  └─────────┘ └─────────┘ └───────────────┘  │
 └─────────────────────────────────────────────┘
               ↑↓ WebSocket / HTTP
-┌─────────────────┬───────────────────────────┐
-│   Web UI        │      Telegram Bot         │
-│ (desktop)       │  (mobile + voice)         │
-└─────────────────┴───────────────────────────┘
+┌─────────────────────────────────────────────┐
+│               Web UI (PWA)                  │
+│  (desktop + mobile via Tailscale / SSH      │
+│   tunnel / LAN, Web Speech API,             │
+│   installable as PWA)                       │
+└─────────────────────────────────────────────┘
 ```
 
 A more detailed architecture diagram is available in [`docs/architecture.html`](docs/architecture.html).
@@ -67,8 +68,7 @@ A more detailed architecture diagram is available in [`docs/architecture.html`](
 | Web server | Axum |
 | WebSocket | Axum WebSocket / `tokio-tungstenite` |
 | Database | SQLite via `sqlx` or `rusqlite` |
-| Telegram bot | `teloxide` |
-| Web UI | Vanilla HTML/CSS/JS |
+| Web UI (PWA) | Vanilla HTML/CSS/JS |
 | Git operations | Shell `git` via `tokio::process::Command` |
 | Terminal/PTY | `portable-pty` / `tokio-pty` |
 | Serialization | `serde` + `serde_json` |
@@ -105,7 +105,7 @@ Start the server against a project:
 agent serve --project /path/to/project
 ```
 
-Then open `http://localhost:8080` in your browser, or interact via the configured Telegram bot.
+Then open `http://localhost:8080` in your browser. For mobile access, expose the server via Tailscale, SSH tunnel, or LAN, or install the PWA.
 
 ### Slash commands
 
@@ -163,7 +163,7 @@ The project is currently in **Phase 1: Foundation**.
 |---|---|
 | 1 — Foundation | Workspace, domain types, SQLite event store, generic OpenAI-compatible provider, built-in tools, HTTP/WebSocket server, CLI |
 | 2 — Worktrees & Agent Loop | Git worktree per session, agent loop, worktree-scoped shell, per-turn undo |
-| 3 — Clients | Web UI, Telegram bot, voice handling |
+| 3 — Clients | PWA web UI, Web Speech API, responsive layout |
 | 4 — Memory, Skills, Guardrails | `memory.md`, `SKILL.md`, policy engine, schema validation, secret redaction |
 | 5 — MCP & Subagents | MCP client, `delegate` tool, restricted subagent toolset, auto-merge |
 | 6 — Polish | Install script, Docker image, docs, benchmarks |
