@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/storage",
+    "crates/llm",
+    "crates/providers",
+    "crates/tools",
+    "crates/recall",
+    "crates/skills",
+    "crates/guardrails",
+    "crates/server",
+    "crates/web",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

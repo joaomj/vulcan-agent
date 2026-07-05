@@ -30,6 +30,7 @@ The following projects were analyzed during the design phase and inform this spe
 |---|---|---|
 | **OpenCode** | https://github.com/anomalyco/opencode | Primary inspiration. Skills format, provider abstraction, event-sourced sessions, SQLite persistence, worktree support, and MCP integration are all derived from studying OpenCode. |
 | **Hermes Agent** | https://github.com/NousResearch/hermes-agent | Reference for Telegram gateway design, voice transcription as a pluggable tool, sophisticated sudo/PTY shell handling, session search, LSP diagnostics, and subagent delegation. Also a warning against feature bloat. |
+| **OMP (Oh My Pi)** | https://github.com/ohmypi/omp | Reference for agent loop design, hash-anchored content edits, subagent orchestration, LSP/DAP integration, model-agnostic role-based routing, and time-traveling stream rules. The most architecturally complete terminal agent in the ecosystem. |
 | **Codex (OpenAI)** | https://github.com/openai/codex | Reference for slash-command UX (`/plan`, `/permissions`, `/model`), worktree usage in the Codex App, and the concept of deterministic user control shortcuts. |
 | **Pi Agent** | https://github.com/earendil-works/pi | Reference for a minimalistic agent runtime. Validates the idea of a small core with pluggable packages, though Pi is TypeScript-based and too raw for direct adoption. |
 
@@ -50,6 +51,15 @@ No mature Rust fork of OpenCode exists today. Several independent Rust agents co
 
 ---
 
+### Implementation methodology
+
+Every implementation step **must** consult the relevant source code of **OMP (Oh My Pi)** and **Hermes Agent** — the two closest projects to Vulcan's envisioned architecture — before writing code. **OpenCode** is a secondary reference for Rust-specific patterns. These projects have already solved — or notably failed at — the same problems Vulcan faces. Specific files to inspect are referenced in each implementation step of `PLAN-V1.md`. Findings (both adopted and consciously rejected) are recorded as part of each step's deliverable.
+
+Reference URLs (ordered by relevance):
+- OMP (Oh My Pi): https://github.com/ohmypi/omp
+- Hermes Agent: https://github.com/NousResearch/hermes-agent
+- OpenCode: https://github.com/anomalyco/opencode
+
 ## 3. Goals
 
 1. **Speed and low memory footprint** — Rust native binary, no Bun/Node/Electron runtime.
@@ -60,7 +70,7 @@ No mature Rust fork of OpenCode exists today. Several independent Rust agents co
 3. **Simplicity** — small invariant core; everything else is optional or external.
 4. **Portability** — runs locally, accessed via browser (desktop and mobile); remote access via Tailscale/SSH tunnel; zero runtime dependencies beyond the system `git` binary.
 5. **Deterministic control** — slash commands and policy engine reduce reliance on the LLM following rules.
-6. **Extensibility** — MCP servers and skills provide modularity without bloating the core; built-in tools only in Phases 1–2, MCP deferred to Phase 5.
+6. **Extensibility** — MCP servers and skills provide modularity without bloating the core; built-in tools only in Phases 1–2, MCP deferred to post-MVP.
 
 ---
 
@@ -140,7 +150,7 @@ The following are explicitly deferred but the MVP **must not preclude** them:
 
 ### 6.3 Worktrees
 
-- Every session starts in a fresh git worktree under `~/.agent/worktrees/<project>/<session-id>/`.
+- Every session starts in a fresh git worktree under `~/.vulcan/worktrees/<project>/<session-id>/`.
 - Subagents get child worktrees nested under the parent's worktree.
 - Undo is implemented by resetting the worktree to a snapshot taken before the last assistant turn (full worktree reset, not file-level revert).
 - Auto-merge: when a subagent finishes, its worktree is committed and cherry-picked / fast-forwarded into the parent worktree. Conflicts pause for user resolution.
@@ -223,7 +233,7 @@ Slash commands are client-side controls that map directly to server actions. The
 ### 6.12 Logging
 
 - **Audit log** — append-only, per-session, stored in SQLite. Records tool calls, approvals, provider calls. Secrets redacted.
-- **Application logs** — structured JSON, configurable levels, rotated daily, stored in `~/.agent/logs/`.
+- **Application logs** — structured JSON, configurable levels, rotated daily, stored in `~/.vulcan/logs/`.
 - **Secret redaction** — API keys, passwords, tokens, env vars redacted by default.
 
 ### 6.13 Code Intelligence
@@ -395,7 +405,7 @@ always_approve_hosts = ["localhost", "127.0.0.1"]  # web_fetch allowlist
 - `code_explore` tool for symbol and structural search.
 - Optional LSP post-write diagnostics. Linters and build/test commands remain authoritative.
 
-### Phase 5 — MCP and Subagents
+### Post-MVP — MCP and Subagents
 - MCP client (`stdio` + `SSE`).
 - `delegate` tool with child worktrees.
 - Restricted subagent toolset.
@@ -455,7 +465,7 @@ vulcan-agent/
 │   ├── web/             # static web UI assets (PWA manifest, service worker)
 │   └── cli/             # clap entrypoint
 └── docs/
-    └── SPEC.md          # this file
+    └── ARCHITECTURE.md  # this file
 ```
 
 ---
@@ -484,7 +494,7 @@ vulcan-agent/
 
 1. Definitive project name.
 2. Exact config file format (`config.toml`, `config.jsonc`, or both).
-3. Whether to support `AGENTS.md` project-local instructions like OpenCode.
+3. ~~Whether to support `AGENTS.md` project-local instructions like OpenCode.~~ **Resolved: supported in MVP per PRD.**
 4. ~~Whether subagents should auto-merge silently or present a diff summary first.~~ Resolved: diff-review-first by default; `--auto-merge` policy flag available.
 5. Whether to support OpenAI Responses API in addition to Chat Completions.
 6. (Resolved) Subagent concurrency: simple `subagent_max_parallel` constant in config (default 4). See §6.14.10.

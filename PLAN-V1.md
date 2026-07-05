@@ -1,6 +1,6 @@
 # Vulcan Agent Implementation Plan V1
 
-This plan turns `docs/SPEC.md` into small, atomic implementation steps. It is ordered for incremental delivery: each step has a concrete output, validation, and a narrow boundary. MVP work is separated from post-MVP work.
+This plan turns `docs/ARCHITECTURE.md` into small, atomic implementation steps. It is ordered for incremental delivery: each step has a concrete output, validation, and a narrow boundary. MVP work is separated from post-MVP work.
 
 ## Ground Rules
 
@@ -344,7 +344,7 @@ Validation:
 Deliverable: New sessions create worktrees under configured data directory.
 
 Tasks:
-- Create `~/.agent/worktrees/<project>/<session-id>/` or configured equivalent.
+- Create `~/.vulcan/worktrees/<project>/<session-id>/` or configured equivalent.
 - Validate source project is clean or record dirty state policy explicitly.
 - Persist worktree path in session events.
 
@@ -396,6 +396,7 @@ Tasks:
 - Include current tool descriptors.
 - Persist provider call start and finish events.
 - Persist assistant message events.
+- Model the loop as a state machine (prompt → LLM → tool calls → execution → stream results) with typed transitions, not ad-hoc conditionals.
 
 Validation:
 - Test with a fake provider returns an assistant message and persists ordered events.
@@ -409,6 +410,7 @@ Tasks:
 - Resolve approval decision before execution.
 - Execute tool with cancellation and timeout.
 - Persist tool call and tool result events.
+- Emit typed streaming events per tool call so the WebSocket layer can push progress to clients without buffering the full result.
 
 Validation:
 - Test with fake provider requests `read`; loop executes and persists result.
@@ -421,6 +423,7 @@ Tasks:
 - Implement decision matrix for `Never`, `OnMode`, `Always`, and `Blocked`.
 - Persist approval request and decision events.
 - Pause pending user approval where required.
+- Return a typed `ApprovalRequired` error variant so the agent loop and WebSocket layer can handle the pause uniformly.
 
 Validation:
 - Unit tests cover every approval class and approval mode combination.
@@ -549,6 +552,18 @@ Validation:
 
 ## Phase 4: Recall, Skills, Guardrails
 
+### Step 4.0: Implement Project Context File Loading
+
+Deliverable: Project-local AGENTS.md is loaded and injected into every session's system context.
+
+Tasks:
+- Discover AGENTS.md (or equivalent) in the project root directory at session start.
+- Load and cache its content for injection into the system prompt on every turn.
+- Handle missing or empty AGENTS.md gracefully (no-op, no error).
+
+Validation:
+- Integration test creates a project with AGENTS.md and verifies its content appears in the provider request built by the agent loop.
+
 ### Step 4.1: Add FTS5 Session Search Tables
 
 Deliverable: Search index tables owned by the session projector.
@@ -671,7 +686,7 @@ Tasks:
 Validation:
 - Tests or smoke checks verify log initialization and redaction behavior.
 
-## Phase 5: MCP And Subagents
+## Post-MVP: MCP And Subagents
 
 ### Step 5.1: Add MCP Crate And Types
 
@@ -803,7 +818,7 @@ Validation:
 Deliverable: Document supported config keys and defaults.
 
 Tasks:
-- Document `[tools]`, `[budgets]`, provider config, log config, data directories, and MCP config if Phase 5 is complete.
+- Document `[tools]`, `[budgets]`, provider config, log config, data directories, and MCP config if the post-MVP phase is complete.
 - Include a minimal example config.
 
 Validation:
@@ -920,6 +935,17 @@ Steps:
 Validation:
 - Gateway does not add core session logic.
 
+## Cross-Phase Reference Consultation
+
+Before implementing any step, consult the relevant source code from **OMP (Oh My Pi)** and **Hermes Agent** — the two closest projects to Vulcan's envisioned architecture — for existing solutions, edge cases, and design patterns. Each step's tasks note which project areas to inspect. File-specific paths are given where known; if a path has changed, search the project's source tree for the equivalent module. **OpenCode** may also be consulted where Rust-specific patterns or SQLite event store design are relevant.
+
+Reasons to consult:
+- **OMP (Oh My Pi)** — closest architectural match for agent loop, subagent orchestration, content-anchored edits, LSP/DAP integration, model-agnostic routing, and streaming protocol design. Note: OMP is TypeScript with a ~55k line Rust core for in-process tools — not pure Rust. Its Rust crates (shell, grep, AST, PTY) are primary references for in-process tool design.
+- **Hermes Agent** — closest match for approval gating, session search, subagent delegation, shell handling, session recall, and Telegram gateway. Also a catalog of anti-patterns (feature bloat, premature optimization).
+- **OpenCode** — secondary reference for Rust-specific patterns: SQLite event store, session projector, provider abstraction, tool registry, skills format, and slash command dispatch.
+
+Document notable findings (both adopted patterns and consciously rejected alternatives) in the implementation description for each step.
+
 ## Cross-Phase Validation Commands
 
 Run these before merging any implementation phase:
@@ -957,9 +983,12 @@ Add phase-specific integration tests as each boundary becomes real:
 ## Open Decisions Before Phase 1 Completion
 
 - Confirm final binary and crate prefix name: `vulcan-agent` or another name.
-- Confirm config format: `config.toml` only, or `config.toml` plus `config.jsonc` later.
-- Confirm whether project-local `AGENTS.md` instructions are supported in MVP.
 - Confirm whether OpenAI Responses API is deferred or added beside Chat Completions.
+
+## Resolved Decisions (from PRD)
+
+- Config format: **`config.toml` only** per PRD config surface.
+- Project-local AGENTS.md: **supported in MVP** per Step 4.0.
 
 ## First Implementation Slice
 

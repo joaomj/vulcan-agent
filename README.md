@@ -129,7 +129,7 @@ Then open `http://localhost:8080` in your browser. For mobile access, expose the
 
 ## Configuration
 
-Configuration lives in `~/.agent/config.toml` (or a project-local `.agent/config.toml`).
+Configuration lives in `~/.vulcan/config.toml` (or a project-local `.vulcan/config.toml`).
 
 ```toml
 [server]
@@ -168,7 +168,7 @@ The project is currently in **Phase 1: Foundation**.
 | 5 — MCP & Subagents | MCP client, `delegate` tool, restricted subagent toolset, auto-merge |
 | 6 — Polish | Install script, Docker image, docs, benchmarks |
 
-See [`docs/SPEC.md`](docs/SPEC.md) for the full specification.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full specification.
 
 ---
 
