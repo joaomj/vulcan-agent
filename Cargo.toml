@@ -6,7 +6,6 @@ members = [
     "crates/llm",
     "crates/providers",
     "crates/tools",
-    "crates/recall",
     "crates/skills",
     "crates/guardrails",
     "crates/server",

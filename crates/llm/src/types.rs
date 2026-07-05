@@ -17,7 +17,9 @@ pub struct ProviderMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContentBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolCall {
         id: ToolCallId,
         name: String,

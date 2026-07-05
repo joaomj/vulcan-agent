@@ -1,15 +1,25 @@
+use crate::id::{MessageId, SessionId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::id::{MessageId, SessionId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: SessionId,
     pub mode: SessionMode,
     pub approval_mode: ApprovalMode,
+    pub project_path: Option<String>,
+    pub model: String,
     pub messages: Vec<Message>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorktreeMetadata {
+    pub source_project_path: String,
+    pub worktree_path: String,
+    pub head_revision: String,
+    pub dirty_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -18,14 +28,13 @@ pub enum SessionMode {
     Ask,
     Plan,
     Build,
-    Debug,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum ApprovalMode {
     #[default]
     Never,
-    OnToolCall,
+    OnMode,
     Always,
 }
 
@@ -48,9 +57,19 @@ pub enum MessageRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContentBlock {
-    Text { text: String },
-    ToolCall { id: String, name: String, arguments: serde_json::Value },
-    ToolResult { id: String, name: String, content: String },
+    Text {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        content: String,
+    },
 }
 
 #[cfg(test)]
@@ -64,11 +83,15 @@ mod tests {
         let session = Session {
             id: SessionId("sess-1".into()),
             mode: SessionMode::Build,
-            approval_mode: ApprovalMode::OnToolCall,
+            approval_mode: ApprovalMode::OnMode,
+            project_path: Some("/tmp/project".into()),
+            model: "gpt-4o-mini".into(),
             messages: vec![Message {
                 id: MessageId("msg-1".into()),
                 role: MessageRole::User,
-                content: vec![ContentBlock::Text { text: "hello".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "hello".into(),
+                }],
                 created_at: ts,
             }],
             created_at: ts,
@@ -78,8 +101,24 @@ mod tests {
         let json = serde_json::to_string(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.id, session.id);
+        assert_eq!(deserialized.project_path, Some("/tmp/project".into()));
+        assert_eq!(deserialized.model, "gpt-4o-mini");
         assert_eq!(deserialized.messages.len(), 1);
         assert!(matches!(deserialized.messages[0].role, MessageRole::User));
+    }
+
+    #[test]
+    fn test_worktree_metadata_serde() {
+        let meta = WorktreeMetadata {
+            source_project_path: "/project".into(),
+            worktree_path: "/data/worktrees/project/sess-1".into(),
+            head_revision: "abc123".into(),
+            dirty_summary: Some("1 file modified".into()),
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: WorktreeMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.source_project_path, "/project");
+        assert_eq!(deserialized.head_revision, "abc123");
     }
 
     #[test]
@@ -88,6 +127,24 @@ mod tests {
         assert_eq!(json, r#""Assistant""#);
         let role: MessageRole = serde_json::from_str(r#""User""#).unwrap();
         assert!(matches!(role, MessageRole::User));
+    }
+
+    #[test]
+    fn test_prd_session_modes_serde() {
+        let modes = [SessionMode::Ask, SessionMode::Plan, SessionMode::Build];
+        let json = serde_json::to_string(&modes).unwrap();
+        assert_eq!(json, r#"["Ask","Plan","Build"]"#);
+    }
+
+    #[test]
+    fn test_prd_approval_modes_serde() {
+        let modes = [
+            ApprovalMode::Never,
+            ApprovalMode::OnMode,
+            ApprovalMode::Always,
+        ];
+        let json = serde_json::to_string(&modes).unwrap();
+        assert_eq!(json, r#"["Never","OnMode","Always"]"#);
     }
 
     #[test]

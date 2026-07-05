@@ -1,10 +1,10 @@
-use axum::{Router, routing::get};
+use crate::config::ServerConfig;
+use crate::state::AppState;
+use axum::{routing::get, Router};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use crate::config::ServerConfig;
-use crate::state::AppState;
 
 pub type SharedState = Arc<RwLock<AppState>>;
 

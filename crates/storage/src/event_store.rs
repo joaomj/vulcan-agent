@@ -1,57 +1,54 @@
-use rusqlite::{Connection, params};
+use crate::error::StorageError;
+use rusqlite::{params, Connection};
 use vulcan_core::event::{Event, EventKind};
 use vulcan_core::id::SessionId;
-use crate::error::StorageError;
 
 pub struct EventStore<'a> {
-    conn: &'a Connection,
+    conn: &'a mut Connection,
 }
 
 impl<'a> EventStore<'a> {
-    pub fn new(conn: &'a Connection) -> Self {
+    pub fn new(conn: &'a mut Connection) -> Self {
         Self { conn }
     }
 
-    pub fn append(&self, event: &Event) -> Result<(), StorageError> {
+    pub fn append(&mut self, event: &Event) -> Result<(), StorageError> {
         let payload = serde_json::to_value(&event.kind)?;
         let event_type = event_type_name(&event.kind);
+        let tx = self.conn.transaction()?;
 
-        self.conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO sessions (id, created_at, updated_at)
              VALUES (?1, ?2, ?2)",
-            params![
-                event.session_id.to_string(),
-                event.created_at.to_rfc3339(),
-            ],
+            params![event.session_id.to_string(), event.created_at.to_rfc3339(),],
         )?;
 
-        self.conn.execute(
+        tx.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
-            params![
-                event.created_at.to_rfc3339(),
-                event.session_id.to_string(),
-            ],
+            params![event.created_at.to_rfc3339(), event.session_id.to_string(),],
         )?;
 
-        self.conn.execute(
-            "INSERT OR IGNORE INTO events (id, session_id, sequence, event_type, payload, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        tx.execute(
+            "INSERT OR IGNORE INTO events (id, session_id, sequence, version, event_type, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 event.id.to_string(),
                 event.session_id.to_string(),
                 event.sequence,
+                event.version,
                 event_type,
                 payload.to_string(),
                 event.created_at.to_rfc3339(),
             ],
         )?;
 
+        tx.commit()?;
         Ok(())
     }
 
     pub fn replay(&self, session_id: &SessionId) -> Result<Vec<Event>, StorageError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, session_id, sequence, event_type, payload, created_at
+            "SELECT id, session_id, sequence, version, event_type, payload, created_at
              FROM events
              WHERE session_id = ?1
              ORDER BY sequence ASC",
@@ -61,8 +58,9 @@ impl<'a> EventStore<'a> {
             let id: String = row.get(0)?;
             let sid: String = row.get(1)?;
             let sequence: u64 = row.get(2)?;
-            let payload: String = row.get(4)?;
-            let created_at_str: String = row.get(5)?;
+            let version: u64 = row.get(3)?;
+            let payload: String = row.get(5)?;
+            let created_at_str: String = row.get(6)?;
 
             let kind: EventKind = serde_json::from_str(&payload)
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
@@ -75,6 +73,7 @@ impl<'a> EventStore<'a> {
                 id: vulcan_core::id::EventId(id),
                 session_id: vulcan_core::id::SessionId(sid),
                 sequence,
+                version,
                 kind,
                 created_at,
             })
@@ -88,9 +87,9 @@ impl<'a> EventStore<'a> {
     }
 
     pub fn list_sessions(&self) -> Result<Vec<SessionId>, StorageError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM sessions ORDER BY updated_at DESC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM sessions ORDER BY updated_at DESC")?;
 
         let rows = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
@@ -135,10 +134,11 @@ fn event_type_name(kind: &EventKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
     use crate::migration;
+    use rusqlite::Connection;
     use vulcan_core::event::EventKind;
     use vulcan_core::id::SessionId;
+    use vulcan_core::session::{MessageRole, SessionMode};
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -146,16 +146,22 @@ mod tests {
         conn
     }
 
+    fn setup_store(conn: &mut Connection) -> EventStore<'_> {
+        EventStore::new(conn)
+    }
+
     #[test]
     fn test_append_and_replay() {
-        let conn = setup_db();
-        let store = EventStore::new(&conn);
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-1".into());
         let event = Event::new(
             session_id.clone(),
             1,
-            EventKind::SessionCreated { mode: "build".into() },
+            EventKind::SessionCreated {
+                mode: SessionMode::Build,
+            },
         );
 
         store.append(&event).unwrap();
@@ -163,28 +169,41 @@ mod tests {
         let events = store.replay(&session_id).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].sequence, 1);
-        assert!(matches!(
-            events[0].kind,
-            EventKind::SessionCreated { .. }
-        ));
+        assert_eq!(events[0].version, 1);
+        assert!(matches!(events[0].kind, EventKind::SessionCreated { .. }));
     }
 
     #[test]
     fn test_replay_order() {
-        let conn = setup_db();
-        let store = EventStore::new(&conn);
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-2".into());
 
-        let e1 = Event::new(session_id.clone(), 1, EventKind::SessionCreated { mode: "build".into() });
-        let e2 = Event::new(session_id.clone(), 2, EventKind::MessageAppended {
-            message_id: vulcan_core::id::MessageId("msg-1".into()),
-            role: "user".into(),
-        });
-        let e3 = Event::new(session_id.clone(), 3, EventKind::ProviderCallStarted {
-            provider_call_id: vulcan_core::id::ProviderCallId("pc-1".into()),
-            model: "gpt-4".into(),
-        });
+        let e1 = Event::new(
+            session_id.clone(),
+            1,
+            EventKind::SessionCreated {
+                mode: SessionMode::Build,
+            },
+        );
+        let e2 = Event::new(
+            session_id.clone(),
+            2,
+            EventKind::MessageAppended {
+                message_id: vulcan_core::id::MessageId("msg-1".into()),
+                role: MessageRole::User,
+                content: Vec::new(),
+            },
+        );
+        let e3 = Event::new(
+            session_id.clone(),
+            3,
+            EventKind::ProviderCallStarted {
+                provider_call_id: vulcan_core::id::ProviderCallId("pc-1".into()),
+                model: "gpt-4".into(),
+            },
+        );
 
         store.append(&e1).unwrap();
         store.append(&e3).unwrap();
@@ -199,14 +218,16 @@ mod tests {
 
     #[test]
     fn test_duplicate_append() {
-        let conn = setup_db();
-        let store = EventStore::new(&conn);
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-3".into());
         let event = Event::new(
             session_id.clone(),
             1,
-            EventKind::SessionCreated { mode: "build".into() },
+            EventKind::SessionCreated {
+                mode: SessionMode::Build,
+            },
         );
 
         store.append(&event).unwrap();
@@ -218,8 +239,8 @@ mod tests {
 
     #[test]
     fn test_missing_session_replay() {
-        let conn = setup_db();
-        let store = EventStore::new(&conn);
+        let mut conn = setup_db();
+        let store = setup_store(&mut conn);
 
         let events = store.replay(&SessionId("nonexistent".into())).unwrap();
         assert!(events.is_empty());
@@ -227,14 +248,30 @@ mod tests {
 
     #[test]
     fn test_list_sessions() {
-        let conn = setup_db();
-        let store = EventStore::new(&conn);
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
 
         let s1 = SessionId("sess-a".into());
         let s2 = SessionId("sess-b".into());
 
-        store.append(&Event::new(s1.clone(), 1, EventKind::SessionCreated { mode: "ask".into() })).unwrap();
-        store.append(&Event::new(s2.clone(), 1, EventKind::SessionCreated { mode: "build".into() })).unwrap();
+        store
+            .append(&Event::new(
+                s1.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Ask,
+                },
+            ))
+            .unwrap();
+        store
+            .append(&Event::new(
+                s2.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Build,
+                },
+            ))
+            .unwrap();
 
         let sessions = store.list_sessions().unwrap();
         assert_eq!(sessions.len(), 2);
@@ -242,15 +279,19 @@ mod tests {
 
     #[test]
     fn test_delete_session() {
-        let conn = setup_db();
-        let store = EventStore::new(&conn);
+        let mut conn = setup_db();
+        let mut store = setup_store(&mut conn);
 
         let session_id = SessionId("sess-del".into());
-        store.append(&Event::new(
-            session_id.clone(),
-            1,
-            EventKind::SessionCreated { mode: "build".into() },
-        )).unwrap();
+        store
+            .append(&Event::new(
+                session_id.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Build,
+                },
+            ))
+            .unwrap();
 
         store.delete_session(&session_id).unwrap();
         let events = store.replay(&session_id).unwrap();

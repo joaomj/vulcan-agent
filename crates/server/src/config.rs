@@ -11,6 +11,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
+    pub data_dir: DataDirConfig,
+    #[serde(default)]
+    pub logs: LogsConfig,
+    #[serde(default)]
     pub budgets: BudgetsConfig,
 }
 
@@ -38,6 +42,20 @@ pub struct ToolsConfig {
     pub subagent_max_parallel: u32,
     #[serde(default)]
     pub always_approve_hosts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataDirConfig {
+    #[serde(default = "default_data_root")]
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsConfig {
+    #[serde(default = "default_logs_dir")]
+    pub dir: String,
+    #[serde(default = "default_log_level")]
+    pub level: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -83,6 +101,18 @@ fn default_subagent_max_parallel() -> u32 {
     4
 }
 
+fn default_data_root() -> String {
+    ".vulcan/data".to_string()
+}
+
+fn default_logs_dir() -> String {
+    ".vulcan/logs".to_string()
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -90,6 +120,8 @@ impl Default for ServerConfig {
             port: default_port(),
             provider: ProviderConfig::default(),
             tools: ToolsConfig::default(),
+            data_dir: DataDirConfig::default(),
+            logs: LogsConfig::default(),
             budgets: BudgetsConfig {},
         }
     }
@@ -118,6 +150,23 @@ impl Default for ToolsConfig {
     }
 }
 
+impl Default for DataDirConfig {
+    fn default() -> Self {
+        Self {
+            root: default_data_root(),
+        }
+    }
+}
+
+impl Default for LogsConfig {
+    fn default() -> Self {
+        Self {
+            dir: default_logs_dir(),
+            level: default_log_level(),
+        }
+    }
+}
+
 impl ServerConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
         Ok(ServerConfig::default())
@@ -137,5 +186,8 @@ mod tests {
         assert_eq!(config.provider.model, "gpt-4o-mini");
         assert_eq!(config.provider.api_key_env, "OPENAI_API_KEY");
         assert_eq!(config.tools.default_timeout_ms, 30_000);
+        assert_eq!(config.data_dir.root, ".vulcan/data");
+        assert_eq!(config.logs.dir, ".vulcan/logs");
+        assert_eq!(config.logs.level, "info");
     }
 }

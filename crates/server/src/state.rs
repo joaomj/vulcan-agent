@@ -1,7 +1,7 @@
+use crate::config::ServerConfig;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use vulcan_core::error::CoreError;
-use crate::config::ServerConfig;
 
 pub struct AppState {
     pub config: ServerConfig,

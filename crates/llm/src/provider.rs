@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use crate::error::LlmError;
 use crate::types::{ProviderRequest, ProviderResponse};
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {

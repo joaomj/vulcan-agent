@@ -14,8 +14,8 @@ pub struct ToolDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ApprovalClass {
     Never,
+    OnMode,
     Always,
-    Blocked,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

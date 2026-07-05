@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use vulcan_core::event::{Event, EventKind};
-use vulcan_core::session::{ApprovalMode, Message, MessageRole, Session, SessionMode};
+use vulcan_core::session::{ApprovalMode, Message, Session, SessionMode};
 
 #[derive(Debug, Clone, Default)]
 pub struct Projection {
@@ -25,50 +25,37 @@ impl SessionProjector {
         let session_id = events[0].session_id.clone();
         let mut mode = SessionMode::Ask;
         let approval_mode = ApprovalMode::Never;
+        let model = String::new();
+        let project_path: Option<String> = None;
         let mut messages: Vec<Message> = Vec::new();
         let mut created_at: Option<DateTime<Utc>> = None;
         let mut updated_at: Option<DateTime<Utc>> = None;
 
         for event in events {
+            if event.version > 1 {
+                projection.warnings.push(format!(
+                    "Unsupported event version {} at sequence {}",
+                    event.version, event.sequence
+                ));
+            }
             updated_at = Some(event.created_at);
 
             match &event.kind {
                 EventKind::SessionCreated { mode: m } => {
-                    mode = match m.as_str() {
-                        "ask" => SessionMode::Ask,
-                        "plan" => SessionMode::Plan,
-                        "build" => SessionMode::Build,
-                        "debug" => SessionMode::Debug,
-                        other => {
-                            projection.warnings.push(format!(
-                                "Unknown session mode '{}' at event {}",
-                                other, event.sequence
-                            ));
-                            SessionMode::Ask
-                        }
-                    };
+                    mode = m.clone();
                     if created_at.is_none() {
                         created_at = Some(event.created_at);
                     }
                 }
-                EventKind::MessageAppended { message_id, role } => {
-                    let msg_role = match role.as_str() {
-                        "user" => MessageRole::User,
-                        "assistant" => MessageRole::Assistant,
-                        "system" => MessageRole::System,
-                        "tool" => MessageRole::Tool,
-                        other => {
-                            projection.warnings.push(format!(
-                                "Unknown message role '{}' at event {}",
-                                other, event.sequence
-                            ));
-                            MessageRole::User
-                        }
-                    };
+                EventKind::MessageAppended {
+                    message_id,
+                    role,
+                    content,
+                } => {
                     messages.push(Message {
                         id: message_id.clone(),
-                        role: msg_role,
-                        content: Vec::new(),
+                        role: role.clone(),
+                        content: content.clone(),
                         created_at: event.created_at,
                     });
                 }
@@ -96,6 +83,8 @@ impl SessionProjector {
             id: session_id,
             mode,
             approval_mode,
+            project_path,
+            model,
             messages,
             created_at: created,
             updated_at: updated,
@@ -116,6 +105,7 @@ mod tests {
     use super::*;
     use vulcan_core::event::Event;
     use vulcan_core::id::{MessageId, ProviderCallId, SessionId};
+    use vulcan_core::session::{ContentBlock, MessageRole, SessionMode};
 
     #[test]
     fn test_empty_events() {
@@ -128,11 +118,24 @@ mod tests {
     fn test_simple_session_projection() {
         let session_id = SessionId("sess-1".into());
         let events = vec![
-            Event::new(session_id.clone(), 1, EventKind::SessionCreated { mode: "build".into() }),
-            Event::new(session_id.clone(), 2, EventKind::MessageAppended {
-                message_id: MessageId("msg-1".into()),
-                role: "user".into(),
-            }),
+            Event::new(
+                session_id.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Build,
+                },
+            ),
+            Event::new(
+                session_id.clone(),
+                2,
+                EventKind::MessageAppended {
+                    message_id: MessageId("msg-1".into()),
+                    role: MessageRole::User,
+                    content: vec![ContentBlock::Text {
+                        text: "hello".into(),
+                    }],
+                },
+            ),
         ];
 
         let projector = SessionProjector::new();
@@ -142,28 +145,54 @@ mod tests {
         assert!(matches!(session.mode, SessionMode::Build));
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.id, session_id);
+        assert!(matches!(session.messages[0].role, MessageRole::User));
+        assert_eq!(session.messages[0].content.len(), 1);
     }
 
     #[test]
     fn test_projection_order() {
         let session_id = SessionId("sess-2".into());
         let events = vec![
-            Event::new(session_id.clone(), 1, EventKind::SessionCreated { mode: "ask".into() }),
-            Event::new(session_id.clone(), 2, EventKind::MessageAppended {
-                message_id: MessageId("msg-1".into()),
-                role: "user".into(),
-            }),
-            Event::new(session_id.clone(), 3, EventKind::ProviderCallStarted {
-                provider_call_id: ProviderCallId("pc-1".into()),
-                model: "gpt-4".into(),
-            }),
-            Event::new(session_id.clone(), 4, EventKind::MessageAppended {
-                message_id: MessageId("msg-2".into()),
-                role: "assistant".into(),
-            }),
-            Event::new(session_id.clone(), 5, EventKind::ErrorRecorded {
-                message: "test error".into(),
-            }),
+            Event::new(
+                session_id.clone(),
+                1,
+                EventKind::SessionCreated {
+                    mode: SessionMode::Ask,
+                },
+            ),
+            Event::new(
+                session_id.clone(),
+                2,
+                EventKind::MessageAppended {
+                    message_id: MessageId("msg-1".into()),
+                    role: MessageRole::User,
+                    content: Vec::new(),
+                },
+            ),
+            Event::new(
+                session_id.clone(),
+                3,
+                EventKind::ProviderCallStarted {
+                    provider_call_id: ProviderCallId("pc-1".into()),
+                    model: "gpt-4".into(),
+                },
+            ),
+            Event::new(
+                session_id.clone(),
+                4,
+                EventKind::MessageAppended {
+                    message_id: MessageId("msg-2".into()),
+                    role: MessageRole::Assistant,
+                    content: Vec::new(),
+                },
+            ),
+            Event::new(
+                session_id.clone(),
+                5,
+                EventKind::ErrorRecorded {
+                    message: "test error".into(),
+                },
+            ),
         ];
 
         let projector = SessionProjector::new();
@@ -174,16 +203,21 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_mode_warning() {
+    fn test_unsupported_version_warning() {
         let session_id = SessionId("sess-3".into());
-        let events = vec![
-            Event::new(session_id.clone(), 1, EventKind::SessionCreated { mode: "unknown_mode".into() }),
-        ];
+        let mut event = Event::new(
+            session_id.clone(),
+            1,
+            EventKind::SessionCreated {
+                mode: SessionMode::Ask,
+            },
+        );
+        event.version = 99;
 
         let projector = SessionProjector::new();
-        let result = projector.project(&events);
+        let result = projector.project(&[event]);
 
         assert!(!result.warnings.is_empty());
-        assert!(result.warnings[0].contains("unknown_mode"));
+        assert!(result.warnings[0].contains("99"));
     }
 }

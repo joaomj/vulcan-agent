@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::error::ToolError;
 use crate::types::ToolDescriptor;
+use std::collections::HashMap;
 
 pub struct ToolRegistry {
     tools: HashMap<String, ToolDescriptor>,
@@ -16,7 +16,10 @@ impl ToolRegistry {
     pub fn register(&mut self, descriptor: ToolDescriptor) -> Result<(), ToolError> {
         let name = descriptor.name.clone();
         if self.tools.contains_key(&name) {
-            return Err(ToolError::Conflict(format!("Tool '{}' already registered", name)));
+            return Err(ToolError::Conflict(format!(
+                "Tool '{}' already registered",
+                name
+            )));
         }
         self.tools.insert(name, descriptor);
         Ok(())
@@ -40,7 +43,7 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ApprovalClass, IsolationLevel, CancellationSupport};
+    use crate::types::{ApprovalClass, CancellationSupport, IsolationLevel};
 
     fn make_descriptor(name: &str) -> ToolDescriptor {
         ToolDescriptor {

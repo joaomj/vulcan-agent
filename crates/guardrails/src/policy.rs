@@ -5,3 +5,9 @@ impl PolicyEngine {
         Self
     }
 }
+
+impl Default for PolicyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}

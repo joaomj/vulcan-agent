@@ -3,7 +3,11 @@ use vulcan_server::config::ServerConfig;
 use vulcan_server::server;
 
 #[derive(Parser)]
-#[command(name = "vulcan-agent", version, about = "A local-first Rust coding agent")]
+#[command(
+    name = "vulcan-agent",
+    version,
+    about = "A local-first Rust coding agent"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

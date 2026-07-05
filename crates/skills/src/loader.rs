@@ -13,3 +13,9 @@ impl SkillsLoader {
         Ok(HashMap::new())
     }
 }
+
+impl Default for SkillsLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
